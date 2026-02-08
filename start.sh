@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# 启动 SunnyProxy
+# 启动 SunnyProxy（直接使用 Railway TCP 端口，无需隧道）
+echo "Starting SunnyProxy..."
 /app/sunnyproxy -config /app/configs/config.yaml &
 PROXY_PID=$!
 
@@ -34,27 +35,7 @@ health_check() {
 cleanup_task &
 health_check &
 
-# 检查是否有 ngrok token
-if [ -n "$NGROK_AUTHTOKEN" ]; then
-    echo "Using ngrok with fixed domain..."
-    /app/ngrok config add-authtoken $NGROK_AUTHTOKEN
+echo "SunnyProxy is running. Use Railway TCP proxy to connect."
 
-    # 如果有自定义域名
-    if [ -n "$NGROK_DOMAIN" ]; then
-        /app/ngrok tcp 8080 --domain=$NGROK_DOMAIN &
-    else
-        /app/ngrok tcp 8080 --log=stdout &
-    fi
-else
-    # 使用 bore（端口不固定）
-    echo "Using bore tunnel (port will change on restart)..."
-    while true; do
-        echo "Starting bore tunnel..."
-        /app/bore local 8080 --to bore.pub 2>&1
-        echo "Bore disconnected, reconnecting in 5 seconds..."
-        sleep 5
-    done
-fi
-
-# 保持运行
-wait
+# 保持容器运行
+wait $PROXY_PID
