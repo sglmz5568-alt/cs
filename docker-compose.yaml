@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  sunnyproxy:
+    build: .
+    container_name: sunnyproxy
+    ports:
+      - "2021:2021"  # 代理端口
+      - "2022:2022"  # Web 管理端口
+    volumes:
+      - ./configs:/app/configs
+      - ./data:/app/data
+    environment:
+      - TZ=Asia/Shanghai
+    restart: unless-stopped

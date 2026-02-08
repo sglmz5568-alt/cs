@@ -1,0 +1,29 @@
+# Fly.io 部署配置
+app = "sunnyproxy"
+primary_region = "hkg"  # 香港节点，延迟较低
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "2021"
+
+[[services]]
+  internal_port = 2021
+  protocol = "tcp"
+
+  [[services.ports]]
+    port = 2021
+
+[[services]]
+  internal_port = 2022
+  protocol = "tcp"
+
+  [[services.ports]]
+    port = 2022
+
+[http_service]
+  internal_port = 2022
+  force_https = false
+  auto_stop_machines = false
+  auto_start_machines = true
