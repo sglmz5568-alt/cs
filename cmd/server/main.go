@@ -34,12 +34,15 @@ func main() {
 	}
 
 	// 支持 Render/Railway 等平台的 PORT 环境变量
+	// Railway 模式：单端口同时提供 Web 和代理服务
+	singlePortMode := false
 	if port := os.Getenv("PORT"); port != "" {
 		var p int
 		fmt.Sscanf(port, "%d", &p)
 		if p > 0 {
 			cfg.Server.WebPort = p
-			cfg.Server.ProxyPort = p + 1000 // 代理端口 = Web端口 + 1000
+			cfg.Server.ProxyPort = p // 单端口模式
+			singlePortMode = true
 		}
 	}
 
@@ -69,20 +72,42 @@ func main() {
 	handler := proxy.NewHandler(engine)
 	handler.SetupHandlers(wrapper.GetProxy())
 
-	go func() {
-		webServer := web.NewServer(cfg, engine, wrapper)
-		if err := webServer.Start(); err != nil {
-			log.Fatalf("Web 服务启动失败: %v\n", err)
-		}
-	}()
+	webServer := web.NewServer(cfg, engine, wrapper)
 
-	go func() {
-		addr := fmt.Sprintf("%s:%d", cfg.Server.BindIP, cfg.Server.ProxyPort)
-		log.Printf("启动代理服务，地址: %s\n", addr)
-		if err := http.ListenAndServe(addr, wrapper.GetProxy()); err != nil {
-			log.Fatalf("代理服务启动失败: %v\n", err)
-		}
-	}()
+	if singlePortMode {
+		// 单端口模式：组合 Web 和代理
+		combinedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// 代理请求特征：有完整的 URL 或者是 CONNECT 方法
+			if r.Method == "CONNECT" || r.URL.Host != "" {
+				wrapper.GetProxy().ServeHTTP(w, r)
+			} else {
+				webServer.GetHandler().ServeHTTP(w, r)
+			}
+		})
+
+		go func() {
+			addr := fmt.Sprintf("%s:%d", cfg.Server.BindIP, cfg.Server.WebPort)
+			log.Printf("启动单端口服务（Web+代理），地址: %s\n", addr)
+			if err := http.ListenAndServe(addr, combinedHandler); err != nil {
+				log.Fatalf("服务启动失败: %v\n", err)
+			}
+		}()
+	} else {
+		// 双端口模式
+		go func() {
+			if err := webServer.Start(); err != nil {
+				log.Fatalf("Web 服务启动失败: %v\n", err)
+			}
+		}()
+
+		go func() {
+			addr := fmt.Sprintf("%s:%d", cfg.Server.BindIP, cfg.Server.ProxyPort)
+			log.Printf("启动代理服务，地址: %s\n", addr)
+			if err := http.ListenAndServe(addr, wrapper.GetProxy()); err != nil {
+				log.Fatalf("代理服务启动失败: %v\n", err)
+			}
+		}()
+	}
 
 	log.Println("========================================")
 	log.Printf("SunnyProxy 已启动")

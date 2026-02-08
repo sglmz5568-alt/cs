@@ -35,7 +35,7 @@ func NewServer(cfg *config.Config, engine *rules.Engine, wrapper *proxy.Wrapper)
 	}
 }
 
-func (s *Server) Start() error {
+func (s *Server) GetHandler() http.Handler {
 	mux := http.NewServeMux()
 
 	s.api.RegisterRoutes(mux)
@@ -43,14 +43,17 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/logs/ws", s.ws.HandleWebSocket)
 
 	staticFS, err := fs.Sub(staticFiles, "static")
-	if err != nil {
-		return err
+	if err == nil {
+		mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 	}
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 
 	mux.HandleFunc("/", s.handleIndex)
 
-	handler := s.auth.Handler(mux)
+	return s.auth.Handler(mux)
+}
+
+func (s *Server) Start() error {
+	handler := s.GetHandler()
 
 	addr := fmt.Sprintf("%s:%d", s.config.Server.BindIP, s.config.Server.WebPort)
 	log.Printf("Web management interface starting on http://%s\n", addr)
