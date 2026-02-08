@@ -214,9 +214,27 @@ func (e *Engine) addToken(token TokenRecord) {
 	}
 
 	e.tokens = append(e.tokens, token)
-	if len(e.tokens) > 100 {
-		e.tokens = e.tokens[1:]
+	// 限制最多保存 50 个 Token，防止内存溢出
+	if len(e.tokens) > 50 {
+		e.tokens = e.tokens[len(e.tokens)-50:]
 	}
+}
+
+// CleanupOldTokens 清理超过指定时间的 Token
+func (e *Engine) CleanupOldTokens(maxAge time.Duration) int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	cutoff := time.Now().Add(-maxAge)
+	var remaining []TokenRecord
+	for _, t := range e.tokens {
+		if t.Timestamp.After(cutoff) {
+			remaining = append(remaining, t)
+		}
+	}
+	removed := len(e.tokens) - len(remaining)
+	e.tokens = remaining
+	return removed
 }
 
 func (e *Engine) GetTokens() []TokenRecord {

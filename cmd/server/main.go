@@ -116,6 +116,21 @@ func main() {
 	log.Printf("证书下载: http://%s:%d/ssl", cfg.Server.BindIP, cfg.Server.WebPort)
 	log.Println("========================================")
 
+	// 启动定时清理任务
+	go func() {
+		ticker := time.NewTicker(30 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			// 清理超过 24 小时的 Token
+			removed := engine.CleanupOldTokens(24 * time.Hour)
+			if removed > 0 {
+				log.Printf("[Cleanup] 清理了 %d 个过期 Token", removed)
+			}
+			// 强制 GC
+			// runtime.GC()
+		}
+	}()
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
