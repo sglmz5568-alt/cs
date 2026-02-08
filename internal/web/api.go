@@ -27,6 +27,7 @@ func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/tokens", a.handleTokens)
 	mux.HandleFunc("/api/status", a.handleStatus)
 	mux.HandleFunc("/ssl", a.handleCertDownload)
+	mux.HandleFunc("/proxy.pac", a.handlePAC)
 }
 
 func (a *API) handleRules(w http.ResponseWriter, r *http.Request) {
@@ -142,4 +143,57 @@ func (a *API) handleCertDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/x-x509-ca-cert")
 	w.Header().Set("Content-Disposition", "attachment; filename=SunnyProxy.cer")
 	w.Write(cert)
+}
+
+func (a *API) handlePAC(w http.ResponseWriter, r *http.Request) {
+	// 获取代理地址（从请求头或使用默认值）
+	proxyHost := r.URL.Query().Get("host")
+	proxyPort := r.URL.Query().Get("port")
+
+	if proxyHost == "" {
+		proxyHost = "centerbeam.proxy.rlwy.net"
+	}
+	if proxyPort == "" {
+		proxyPort = "12964"
+	}
+
+	// 从规则中提取需要代理的域名
+	rules := a.engine.GetRules()
+	var domains []string
+	for _, rule := range rules {
+		if rule.Enabled && rule.Match != "" {
+			// 提取域名部分
+			domains = append(domains, rule.Match)
+		}
+	}
+
+	// 生成 PAC 脚本
+	pac := `function FindProxyForURL(url, host) {
+    // 需要走代理的域名/关键词
+    var proxyPatterns = [`
+
+	for i, domain := range domains {
+		if i > 0 {
+			pac += ","
+		}
+		pac += `"` + domain + `"`
+	}
+
+	pac += `];
+
+    // 检查是否匹配
+    for (var i = 0; i < proxyPatterns.length; i++) {
+        if (shExpMatch(host, "*" + proxyPatterns[i] + "*") ||
+            url.indexOf(proxyPatterns[i]) !== -1) {
+            return "PROXY ` + proxyHost + `:` + proxyPort + `";
+        }
+    }
+
+    // 其他请求直连
+    return "DIRECT";
+}`
+
+	w.Header().Set("Content-Type", "application/x-ns-proxy-autoconfig")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Write([]byte(pac))
 }
