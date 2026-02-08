@@ -1,12 +1,12 @@
 # SunnyProxy 配置文件
 
 server:
-  proxy_port: 9000      # 代理服务端口（使用开放端口）
-  web_port: 5000        # Web 管理端口（使用开放端口）
+  proxy_port: 8888      # 代理服务端口
+  web_port: 8080        # Web 管理端口
   bind_ip: "0.0.0.0"    # 绑定 IP
 
 security:
-  enabled: true                    # 是否启用认证
+  enabled: false                   # 关闭认证方便测试
   api_token: "your-secret-token"   # API 认证 Token
   allowed_ips:                     # IP 白名单（空则允许所有）
     - "0.0.0.0/0"

@@ -1,4 +1,4 @@
-FROM golang:1.21-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
 WORKDIR /app
 
@@ -18,6 +18,6 @@ WORKDIR /app
 COPY --from=builder /app/sunnyproxy /app/sunnyproxy
 COPY --from=builder /app/configs /app/configs
 
-EXPOSE 2021 2022
+EXPOSE 8888 8080
 
 CMD ["/app/sunnyproxy", "-config", "/app/configs/config.yaml"]
