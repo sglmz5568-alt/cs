@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/elazarl/goproxy"
@@ -38,17 +39,25 @@ func (h *Handler) handleRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http
 	}
 	method := req.Method
 
-	headers := make(map[string]string)
-	for k, v := range req.Header {
-		if len(v) > 0 {
-			headers[k] = v[0]
-		}
+	// 只处理 qmai 相关请求
+	if !strings.Contains(url, "qmai") {
+		return req, nil
 	}
 
-	h.modifier.ExtractTokens(url, headers)
+	// 只在 payment-another-info 请求时处理
+	if strings.Contains(url, "payment-another-info") {
+		// 提取 Token
+		headers := make(map[string]string)
+		for k, v := range req.Header {
+			if len(v) > 0 {
+				headers[k] = v[0]
+			}
+		}
+		h.modifier.ExtractTokens(url, headers)
 
-	newURL, appliedRules, modified := h.modifier.ModifyURL(url)
-	if modified {
+		// 替换 URL: payment-another-info -> payment-info
+		newURL := strings.ReplaceAll(url, "payment-another-info", "payment-info")
+
 		if strings.HasPrefix(newURL, "https://") {
 			newURL = newURL[8:]
 		} else if strings.HasPrefix(newURL, "http://") {
@@ -70,11 +79,46 @@ func (h *Handler) handleRequest(req *http.Request, ctx *goproxy.ProxyCtx) (*http
 				req.URL.Path = pathAndQuery
 			}
 		}
+
+		h.broadcaster.LogRequest(method, url, true, []string{"payment-replace"})
+		return req, nil
 	}
 
-	h.broadcaster.LogRequest(method, url, modified, appliedRules)
-
+	// 其他 qmai 请求直接透传，不做任何处理
 	return req, nil
+}
+
+// getContentType 根据文件扩展名返回正确的 Content-Type
+func getContentType(path string) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".js":
+		return "application/javascript; charset=utf-8"
+	case ".css":
+		return "text/css; charset=utf-8"
+	case ".html", ".htm":
+		return "text/html; charset=utf-8"
+	case ".json":
+		return "application/json; charset=utf-8"
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".svg":
+		return "image/svg+xml"
+	case ".woff":
+		return "font/woff"
+	case ".woff2":
+		return "font/woff2"
+	case ".ttf":
+		return "font/ttf"
+	case ".eot":
+		return "application/vnd.ms-fontobject"
+	default:
+		return ""
+	}
 }
 
 func (h *Handler) handleResponse(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
@@ -82,14 +126,20 @@ func (h *Handler) handleResponse(resp *http.Response, ctx *goproxy.ProxyCtx) *ht
 		return resp
 	}
 
-	url := ctx.Req.URL.String()
-	if ctx.Req.URL.Scheme == "" {
-		url = "https://" + ctx.Req.Host + ctx.Req.URL.Path
+	// 修正 Content-Type
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" || contentType == "text/plain; charset=utf-8" || contentType == "text/plain" {
+		path := ctx.Req.URL.Path
+		if idx := strings.Index(path, "?"); idx != -1 {
+			path = path[:idx]
+		}
+		correctType := getContentType(path)
+		if correctType != "" {
+			resp.Header.Set("Content-Type", correctType)
+		} else if contentType == "" {
+			resp.Header.Del("Content-Type")
+		}
 	}
-	method := ctx.Req.Method
-	statusCode := resp.StatusCode
-
-	h.broadcaster.LogResponse(method, url, statusCode)
 
 	return resp
 }

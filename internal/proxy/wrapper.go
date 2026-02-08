@@ -3,28 +3,63 @@ package proxy
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"net"
 	"net/http"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/elazarl/goproxy"
+	"sunnyproxy/internal/rules"
 )
 
 type Wrapper struct {
-	mu       sync.RWMutex
-	proxy    *goproxy.ProxyHttpServer
-	port     int
-	caCert   []byte
-	caKey    []byte
-	certPool *x509.CertPool
+	mu        sync.RWMutex
+	proxy     *goproxy.ProxyHttpServer
+	port      int
+	caCert    []byte
+	caKey     []byte
+	certPool  *x509.CertPool
+	engine    *rules.Engine
+	transport *http.Transport
 }
 
 func NewWrapper() *Wrapper {
 	proxy := goproxy.NewProxyHttpServer()
 	proxy.Verbose = false
 
-	return &Wrapper{
-		proxy: proxy,
+	// 创建优化的 Transport，启用连接池和 Keep-Alive
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   10,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		ForceAttemptHTTP2:     true,
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
 	}
+
+	// 设置代理的 Transport
+	proxy.Tr = transport
+
+	return &Wrapper{
+		proxy:     proxy,
+		transport: transport,
+	}
+}
+
+func (w *Wrapper) SetEngine(engine *rules.Engine) *Wrapper {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.engine = engine
+	return w
 }
 
 func (w *Wrapper) SetPort(port int) *Wrapper {
@@ -55,6 +90,10 @@ func (w *Wrapper) Start(addr string) error {
 }
 
 func (w *Wrapper) Stop() {
+	// 关闭连接池
+	if w.transport != nil {
+		w.transport.CloseIdleConnections()
+	}
 }
 
 func (w *Wrapper) SetCA(cert, key []byte) error {
@@ -88,9 +127,26 @@ func (w *Wrapper) ExportCert() []byte {
 	return w.caCert
 }
 
+// shouldMitm 检查是否需要对该域名进行 MITM
+func (w *Wrapper) shouldMitm(host string) bool {
+	// 只对包含 qmai.cn 的域名进行 MITM
+	if strings.Contains(host, "qmai.cn") {
+		return true
+	}
+	return false
+}
+
 func (w *Wrapper) EnableMITM() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	w.proxy.OnRequest().HandleConnect(goproxy.AlwaysMitm)
+	// 只对目标域名进行 MITM，其他直接透传
+	w.proxy.OnRequest().HandleConnectFunc(func(host string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
+		if w.shouldMitm(host) {
+			// 需要处理的域名：进行 MITM 解密
+			return goproxy.MitmConnect, host
+		}
+		// 其他域名：直接透传，不解密
+		return goproxy.OkConnect, host
+	})
 }
