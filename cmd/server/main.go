@@ -33,6 +33,16 @@ func main() {
 		cfg = config.Default()
 	}
 
+	// 支持 Render/Railway 等平台的 PORT 环境变量
+	if port := os.Getenv("PORT"); port != "" {
+		var p int
+		fmt.Sscanf(port, "%d", &p)
+		if p > 0 {
+			cfg.Server.WebPort = p
+			cfg.Server.ProxyPort = p + 1000 // 代理端口 = Web端口 + 1000
+		}
+	}
+
 	broadcaster := logger.GetBroadcaster()
 	broadcaster.SetConsoleOutput(cfg.Logging.Console)
 
