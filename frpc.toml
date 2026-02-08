@@ -1,0 +1,10 @@
+serverAddr = "frp.freefrp.net"
+serverPort = 7000
+auth.token = "freefrp.net"
+
+[[proxies]]
+name = "sunnyproxy-railway"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 8080
+remotePort = 0

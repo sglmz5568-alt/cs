@@ -6,19 +6,14 @@
 # 等待服务启动
 sleep 3
 
-# 自动重连函数
-start_tunnel() {
-    while true; do
-        echo "Starting bore tunnel for port $1..."
-        /app/bore local $1 --to bore.pub
-        echo "Tunnel for port $1 disconnected, reconnecting in 5 seconds..."
-        sleep 5
-    done
-}
+# 启动 frp 客户端（会自动重连）
+echo "Starting frp tunnel..."
+/app/frpc -c /app/frpc.toml &
 
-# 启动隧道（带自动重连）
-start_tunnel 8888 &
-start_tunnel 8080 &
-
-# 保持容器运行
-wait
+# 备用：同时启动 bore 隧道
+while true; do
+    echo "Starting bore tunnel..."
+    /app/bore local 8080 --to bore.pub 2>&1 || true
+    echo "Bore disconnected, reconnecting in 5 seconds..."
+    sleep 5
+done
