@@ -10,12 +10,14 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"sunnyproxy/internal/ipfilter"
 	"sunnyproxy/internal/logger"
 	"sunnyproxy/internal/proxy"
 	"sunnyproxy/internal/rules"
@@ -72,6 +74,10 @@ func main() {
 	handler := proxy.NewHandler(engine)
 	handler.SetupHandlers(wrapper.GetProxy())
 
+	// 初始化IP过滤器（只允许中国IP）
+	filter := ipfilter.GetFilter()
+	log.Printf("IP过滤已启用，仅允许中国IP访问")
+
 	webServer := web.NewServer(cfg, engine, wrapper)
 
 	if singlePortMode {
@@ -79,6 +85,15 @@ func main() {
 		combinedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// 代理请求特征：有完整的 URL 或者是 CONNECT 方法
 			if r.Method == "CONNECT" || r.URL.Host != "" {
+				clientIP := r.RemoteAddr
+				if !filter.IsAllowed(clientIP) {
+					if hijacker, ok := w.(http.Hijacker); ok {
+						if conn, _, err := hijacker.Hijack(); err == nil {
+							conn.Close()
+						}
+					}
+					return
+				}
 				wrapper.GetProxy().ServeHTTP(w, r)
 			} else {
 				webServer.GetHandler().ServeHTTP(w, r)
@@ -103,7 +118,13 @@ func main() {
 		go func() {
 			addr := fmt.Sprintf("%s:%d", cfg.Server.BindIP, cfg.Server.ProxyPort)
 			log.Printf("启动代理服务，地址: %s\n", addr)
-			if err := http.ListenAndServe(addr, wrapper.GetProxy()); err != nil {
+			// 使用自定义的TCP监听器，在连接层面过滤IP
+			listener, err := net.Listen("tcp", addr)
+			if err != nil {
+				log.Fatalf("代理服务启动失败: %v\n", err)
+			}
+			filteredListener := &filteredListener{Listener: listener, filter: filter}
+			if err := http.Serve(filteredListener, wrapper.GetProxy()); err != nil {
 				log.Fatalf("代理服务启动失败: %v\n", err)
 			}
 		}()
@@ -196,4 +217,27 @@ func loadOrGenerateCA() ([]byte, []byte, error) {
 	os.WriteFile(keyFile, keyPEM, 0600)
 
 	return certPEM, keyPEM, nil
+}
+
+// filteredListener 是一个带IP过滤的TCP监听器
+type filteredListener struct {
+	net.Listener
+	filter *ipfilter.Filter
+}
+
+func (l *filteredListener) Accept() (net.Conn, error) {
+	for {
+		conn, err := l.Listener.Accept()
+		if err != nil {
+			return nil, err
+		}
+
+		// 检查客户端IP是否允许
+		if l.filter.IsAllowed(conn.RemoteAddr().String()) {
+			return conn, nil
+		}
+
+		// 不允许的IP直接关闭连接
+		conn.Close()
+	}
 }

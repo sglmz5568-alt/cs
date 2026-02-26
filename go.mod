@@ -12,6 +12,7 @@ require (
 )
 
 require (
+	github.com/elazarl/goproxy/ext v0.0.0-20260212222702-ffdf0b284e35 // indirect
 	golang.org/x/net v0.38.0 // indirect
 	golang.org/x/text v0.23.0 // indirect
 )

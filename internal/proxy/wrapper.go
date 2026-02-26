@@ -3,6 +3,7 @@ package proxy
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -10,18 +11,23 @@ import (
 	"time"
 
 	"github.com/elazarl/goproxy"
+	"github.com/elazarl/goproxy/ext/auth"
+	"sunnyproxy/internal/domainfilter"
 	"sunnyproxy/internal/rules"
 )
 
 type Wrapper struct {
-	mu        sync.RWMutex
-	proxy     *goproxy.ProxyHttpServer
-	port      int
-	caCert    []byte
-	caKey     []byte
-	certPool  *x509.CertPool
-	engine    *rules.Engine
-	transport *http.Transport
+	mu          sync.RWMutex
+	proxy       *goproxy.ProxyHttpServer
+	port        int
+	caCert      []byte
+	caKey       []byte
+	certPool    *x509.CertPool
+	engine      *rules.Engine
+	transport   *http.Transport
+	authEnabled bool
+	authUser    string
+	authPass    string
 }
 
 func NewWrapper() *Wrapper {
@@ -140,8 +146,29 @@ func (w *Wrapper) EnableMITM() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	// 只对目标域名进行 MITM，其他直接透传
+	// 获取域名过滤器
+	domainFilter := domainfilter.GetFilter()
+
+	// 设置代理认证（使用 goproxy 内置的认证机制）
+	if w.authEnabled {
+		auth.ProxyBasic(w.proxy, "SunnyProxy", func(user, passwd string) bool {
+			if user == w.authUser && passwd == w.authPass {
+				return true
+			}
+			log.Printf("[Auth] 认证失败，用户名: %s", user)
+			return false
+		})
+		log.Printf("[Auth] 代理认证已启用")
+	}
+
+	// HTTPS 请求处理（CONNECT方法）
 	w.proxy.OnRequest().HandleConnectFunc(func(host string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
+		// 检查域名白名单
+		if !domainFilter.IsAllowed(host) {
+			log.Printf("[DomainFilter] 拒绝访问: %s", host)
+			return goproxy.RejectConnect, host
+		}
+
 		if w.shouldMitm(host) {
 			// 需要处理的域名：进行 MITM 解密
 			return goproxy.MitmConnect, host
@@ -149,4 +176,29 @@ func (w *Wrapper) EnableMITM() {
 		// 其他域名：直接透传，不解密
 		return goproxy.OkConnect, host
 	})
+
+	// HTTP 请求处理
+	w.proxy.OnRequest().DoFunc(func(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+		host := req.Host
+		if host == "" {
+			host = req.URL.Host
+		}
+
+		// 检查域名白名单
+		if !domainFilter.IsAllowed(host) {
+			log.Printf("[DomainFilter] 拒绝HTTP访问: %s", host)
+			return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusForbidden, "Access Denied")
+		}
+
+		return req, nil
+	})
+}
+
+// SetAuth 设置代理认证
+func (w *Wrapper) SetAuth(username, password string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.authUser = username
+	w.authPass = password
+	w.authEnabled = true
 }
