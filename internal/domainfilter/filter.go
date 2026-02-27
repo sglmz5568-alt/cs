@@ -24,6 +24,7 @@ func GetFilter() *DomainFilter {
 			allowList: []string{
 				// IP地址
 				"114.66.51.98",
+				"110.42.67.153",
 
 				// suraimu
 				"suraimu.com",
@@ -95,8 +96,6 @@ func (f *DomainFilter) IsAllowed(host string) bool {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
-	originalHost := host
-
 	// 移除端口号
 	if idx := strings.LastIndex(host, ":"); idx != -1 {
 		// 检查是否是IPv6
@@ -110,12 +109,10 @@ func (f *DomainFilter) IsAllowed(host string) bool {
 	// 检查是否匹配白名单
 	for _, allowed := range f.allowList {
 		if strings.Contains(host, strings.ToLower(allowed)) {
-			log.Printf("[DomainFilter] 允许访问: %s (匹配规则: %s)", originalHost, allowed)
 			return true
 		}
 	}
 
-	log.Printf("[DomainFilter] 拒绝访问: %s (处理后: %s)", originalHost, host)
 	return false
 }
 

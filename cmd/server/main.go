@@ -118,7 +118,7 @@ func main() {
 		go func() {
 			addr := fmt.Sprintf("%s:%d", cfg.Server.BindIP, cfg.Server.ProxyPort)
 			log.Printf("启动代理服务，地址: %s\n", addr)
-			// 使用自定义的TCP监听器，在连接层面过滤IP
+			// 使用自定义的TCP监听器，非白名单IP直接断开连接
 			listener, err := net.Listen("tcp", addr)
 			if err != nil {
 				log.Fatalf("代理服务启动失败: %v\n", err)

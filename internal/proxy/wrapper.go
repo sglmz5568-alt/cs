@@ -163,9 +163,8 @@ func (w *Wrapper) EnableMITM() {
 
 	// HTTPS 请求处理（CONNECT方法）
 	w.proxy.OnRequest().HandleConnectFunc(func(host string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
-		// 检查域名白名单
+		// 检查域名白名单，不在白名单直接断开
 		if !domainFilter.IsAllowed(host) {
-			log.Printf("[DomainFilter] 拒绝访问: %s", host)
 			return goproxy.RejectConnect, host
 		}
 
@@ -184,10 +183,9 @@ func (w *Wrapper) EnableMITM() {
 			host = req.URL.Host
 		}
 
-		// 检查域名白名单
+		// 检查域名白名单，不在白名单直接断开（返回空响应触发连接关闭）
 		if !domainFilter.IsAllowed(host) {
-			log.Printf("[DomainFilter] 拒绝HTTP访问: %s", host)
-			return req, goproxy.NewResponse(req, goproxy.ContentTypeText, http.StatusForbidden, "Access Denied")
+			return req, goproxy.NewResponse(req, "text/plain", http.StatusForbidden, "")
 		}
 
 		return req, nil
